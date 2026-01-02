@@ -1,0 +1,115 @@
+parameters:
+  - name: pipelineartifactname
+    type: string
+  - name: imagerepositoryname
+    type: string
+  - name: sourceacrsc
+    type: string
+  - name: testacrsc
+    type: string
+  - name: servicename
+    type: string
+  - name: imageTag
+    type: string
+  - name: baseimageacr
+    type: string
+
+steps:
+
+    - task: Docker@2
+      displayName: Initialize docker
+      enabled: true
+      inputs:
+        command: 'login'
+        containerRegistry: '${{ parameters.sourceacrsc }}'
+
+    - task: Docker@2
+      displayName: Building ${{ parameters.servicename }} image
+      inputs:
+        containerRegistry: '${{ parameters.sourceacrsc }}'
+        command: 'build'
+
+        repository: '${{ parameters.imagerepositoryname }}'
+        Dockerfile: '$(System.DefaultWorkingDirectory)/Dockerfile'
+        tags: |
+          ${{ parameters.imageTag }}
+          latest 
+        arguments: '--build-arg BASE_IMAGE_ACR_ARG=${{ parameters.baseimageacr }}'  
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "Current Path: $(System.DefaultWorkingDirectory)"
+          pwd
+          ls
+          
+
+    # - task: CmdLine@2
+    #   displayName: Tagging ${{ parameters.servicename }} Image locally with buildid
+    #   inputs: 
+    #       script: 'docker tag $(container-registry-eec)/${{ parameters.imagerepositoryname }}:${{ parameters.imageTag }} $(container-registry-test)/${{ parameters.imagerepositoryname }}:${{ parameters.imageTag }}'           
+
+    # - task: CmdLine@2
+    #   displayName: Tagging ${{ parameters.servicename }} Image locally with latest
+    #   inputs: 
+    #       script: 'docker tag $(container-registry-eec)/${{ parameters.imagerepositoryname }}:latest $(container-registry-test)/${{ parameters.imagerepositoryname }}:latest'
+
+    - task: Docker@2
+      displayName: Push ${{ parameters.servicename }} image
+      inputs:
+        containerRegistry: '${{ parameters.testacrsc }}'
+        repository: '${{ parameters.imagerepositoryname }}'
+        command: 'push'
+        tags: |
+          ${{ parameters.imageTag }}
+          latest
+          
+    # - task: Bash@3
+    #   displayName: Download Twistlock cli
+    #   inputs:
+    #    targetType: 'inline'
+    #    script: |
+    #      curl -k -o twistlock https://artifactory- && chmod 755 twistlock
+
+    # - task: Bash@3
+    #   displayName: Run Twistlock scan
+    #   inputs:
+    #    targetType: 'inline'
+    #    script: |
+    #     ./twistlock images scan --address '"/"${{ parameters.imagerepositoryname }}":$(Build.BuildId)
+    #     echo "---twistlock scan ran successfully---"
+    #     echo $?
+    #   continueOnError: false   
+
+#    - task: twistcli-scan@1
+#      inputs:
+#          scanType: 'images'
+#          twistlockService: 'twistlock_etext'
+#          vulnerabilityThreshold: 'high'
+#          onlyFixed: true
+#          gracePeriod: '10'
+#          complianceThreshold: 'high'
+#          artifact: '$(container-registry-test)"/"${{ parameters.imagerepositoryname }}":$(Build.BuildId)'
+
+
+    # - task: Bash@3
+    #   condition: always()
+    #   displayName: Remove the docker images built on build agent
+    #   inputs:
+    #      targetType: 'inline'
+    #      script: |
+    #       # Write your commands here          
+    #       docker rmi $(container-registry-test)/${{ parameters.imagerepositoryname }}:latest
+    #       docker rmi $(container-registry-test)/${{ parameters.imagerepositoryname }}:${{ parameters.imageTag }}
+    #       echo "*****************"
+    #       docker images
+          
+    # - task: CmdLine@2
+    #   inputs:
+    #     script: "docker system prune -a --force"          
+
+    # - task: DeleteFiles@1
+    #   displayName: cleaning the agent
+    #   inputs:
+    #     SourceFolder: '$(System.DefaultWorkingDirectory)'
+    #     Contents: '*'
