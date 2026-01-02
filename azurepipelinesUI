@@ -45,11 +45,11 @@ resources:
   repositories:
     - repository: variables
       type: git
-      name: ADX-DAS-ART/IN-DAS-ART-PIPELINE 
+      name: ART-PIPELINE 
       ref: feature/ui
  
 variables:
-# - group: bitp-shared-dev-kv
+# - group: dev-kv
 - template: pipeline/variables/${{ parameters.Servicename }}.yml@variables
 - name: ReleaseVersion
   ${{ if or(eq(parameters['action'], 'Deploy-package'), ne(parameters['environment'], 'dev')) }}:
@@ -85,13 +85,13 @@ stages:
         container:
           image: $(image-src-node)
           options: --user 0
-          endpoint: bitp-acr-dev-westus-serviceconnection
+          endpoint: acr-serviceconnection
         steps:
           - template: pipeline/templates/node-build.yml@variables 
             parameters:
               pipelineartifactname: $(pipelineartifact-name)
-              ci_da_artifactory_user: 'bitp-artif-svc'
-              ci_da_artifactory_auth: 'e1oM9lWhaqDkPpfXLfKjOtcVtIC7YMsM'
+              ci_da_artifactory_user: 'artif'
+              ci_da_artifactory_auth: ''
       - job: SonarQubeScan
         dependsOn: Build_angular_file
         pool: 
@@ -201,8 +201,8 @@ stages:
         environment: 'testui-${{ parameters.environment }}-${{ parameters.Servicename }}' 
         pool: $(agentpool-linux-name)
         container:
-          image: 'daaacrprod.azurecr.io/daa/azure-k8s:latest' 
-          endpoint: 'bitp-daaacrprod-dev-new-sc' 
+          image: 'azure-k8s:latest' 
+          endpoint: 'sc' 
         strategy:
           runOnce:
             deploy:
