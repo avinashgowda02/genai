@@ -1,0 +1,158 @@
+parameters:
+  - name: pipelineartifactname
+    type: string
+  - name: ci_da_artifactory_user
+    type: string
+  - name: ci_da_artifactory_auth
+    type: string
+
+steps:
+
+    # - task: UsePythonVersion@0
+    #   inputs:
+    #     versionSpec: '3.10' # Match Python version in Dockerfile if possible
+    #   displayName: 'Use Python 3.10'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          pwd
+          cd $(folder-path)
+          pwd
+          ls -larth
+          pip install --upgrade pip
+          # apk add --no-cache libstdc++ gcc musl-dev postgresql-dev
+          pip install -r requirements.txt
+          pip install pytest-cov
+          pip install pytest-asyncio
+          # pytest --cov=app --cov-report=xml:coverage.xml --junitxml=reports/junit.xml
+        workingDir: '$(folder-path)' # Set the working directory here
+      displayName: 'Install Python dependencies (using Bash)'
+      condition: succeeded() # Only run if Python setup succeeded
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'    
+        script: |
+          pwd
+          ls -larth
+          cd $(folder-path) 
+          # python -m pytest -vv
+          # export PYTHONPATH=$(folder_path)
+          # python -m pytest --cov=$(folder_path)/services --cov-report=xml --cov-report=term-missing
+          # python -m pytest --cov=. --cov-report=xml:coverage.xml --junitxml=reports/junit.xml
+          pwd
+          ls -larth
+          python -m pytest --cov=api --cov=main --cov=core --cov=crud --cov=services --cov=schemas --cov=db --cov-report=xml:coverage.xml 
+      env:
+        CLEANUP_TIMEOUT_SECONDS: 60            
+        workingDir: '$(folder-path)' # Set the working directory here
+      displayName: 'Run Pytest'
+      continueOnError: true
+
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results'
+      inputs:
+        testResultsFormat: 'JUnit'
+        searchFolder: '$(folder-path)'
+        testResultsFiles: 'reports/junit.xml'
+        # failTaskOnFailedTests: true # Fails the pipeline if any tests failed
+      # This is the equivalent of 'when: always'
+      condition: succeededOrFailed()
+  # # This is the equivalent of 'artifacts: paths:' for the coverage file
+  #   - task: PublishPipelineArtifact@1
+  #     displayName: 'Publish Coverage Report'
+  #     inputs:
+  #       targetPath: '$(folder-path)/coverage.xml'
+  #       artifactName: 'coverage-report'
+  #     # This is the equivalent of 'when: always'
+  #     condition: succeededOrFailed()
+      
+    # - task: PublishPipelineArtifact@1
+    #   displayName: 'Publish Codebase Artifact'
+    #   inputs:
+    #     targetPath: '$(folder-path)'
+    #     artifactName: 'codebase'
+    #   condition: succeeded()     
+
+    - bash: |
+        echo $(releasename.releaseversion)
+      displayName: displaying releaseversion 
+
+    - task: CopyFiles@2
+      displayName: Copy the python to artifact loaction
+      inputs:
+        Contents: '**'
+        TargetFolder: '$(System.DefaultWorkingDirectory)'
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish the python as artifacts
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)'
+        ArtifactName: ${{ parameters.pipelineartifactname }}
+        publishLocation: 'pipeline'
+:
+  - name: pipelineartifactname
+    type: string
+  - name: ci_da_artifactory_user
+    type: string
+  - name: ci_da_artifactory_auth
+    type: string
+
+steps:
+
+    - task: Npm@1            
+      inputs:
+        command: "install"
+        workingDir: "$(folder-path)"
+        verbose: true
+    - task: Bash@3
+      inputs:
+        workingDir: "$(folder-path)"
+        targetType: "inline"
+        script: |
+           pwd
+           cd $(folder-path)        
+           npm run setup                
+    - task: Bash@3
+      inputs:
+        workingDir: "$(folder-path)"
+        targetType: "inline"
+        script: |
+             pwd
+             cd $(folder-path)
+             npm run build --verbose -- --base-href /test/
+             pwd
+             ls -lrta
+             #ng test
+             #npm run test-headless
+             exit 0
+    - bash: |
+       echo $(folder-path)
+       pwd
+       ls -larth
+       cd $(folder-path)
+       pwd
+       ls -larth
+       echo "##vso[task.setvariable variable=releaseversion;isOutput=true]$(node -p "require('./package.json').version")"
+      displayName: Fetching release version from packagejson
+      name: releasename
+
+    - bash: |
+       echo $(releasename.releaseversion)
+      displayName: displaying releaseversion             
+
+
+    - task: CopyFiles@2
+      displayName: Copy the dist to artifact loaction
+      inputs:
+        Contents: '**'
+        TargetFolder: '$(System.DefaultWorkingDirectory)'
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish the dist as artifacts
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)'
+        ArtifactName: ${{ parameters.pipelineartifactname }}
+        publishLocation: 'pipeline'
