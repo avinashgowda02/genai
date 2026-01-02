@@ -1,0 +1,22 @@
+FROM python:3.13-bullseye
+
+WORKDIR /app
+
+COPY test_BACKEND/requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Assuming app.py is directly under test_BACKEND
+COPY test_BACKEND/main.py .
+
+# Copy specific directories, ensuring they are created in the destination
+COPY test_BACKEND/api ./api/
+COPY test_BACKEND/core ./core/
+COPY test_BACKEND/crud ./crud/
+COPY test_BACKEND/db ./db/
+COPY test_BACKEND/schemas ./schemas/
+COPY test_BACKEND/services ./services/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
