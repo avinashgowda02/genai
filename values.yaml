@@ -1,0 +1,193 @@
+# Global Helm values
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: "#{artifactregistry}#/gdmmax_backend_uat"
+  pullPolicy: Always # Or IfNotPresent
+ # Overrides the image tag whose default is the chart appVersion.
+  tag: "" # Using the appversion placeholder, ensure it's set
+
+imagePullSecrets: []
+#  - name: my-registry-secret
+
+# Service Account configuration
+serviceAccount:
+  create: false # Set to false if you are using an existing service account
+  name: "" # Name of the service account to create or use. Defaults to fullname if 'create' is true.
+  annotations: {} # Annotations for the service account
+
+# Pod-level configurations
+podAnnotations: {}
+  # example-annotation: "true"
+
+workloadIdentity:
+  enabled: true # For azure.workload.identity/use: "true" label
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+# Container-specific configurations
+container:
+  name: "test" # Or leave empty to default to {{ include "service.name" . }}
+  portName: "http"         # Named port for container
+  port: 8000               # Container listens on this port
+
+  # Security context for the main container
+  securityContext: {}
+    # capabilities:
+    #   drop:
+    #   - ALL
+    # readOnlyRootFilesystem: true
+    # runAsNonRoot: true
+    # runAsUser: 1000
+
+  # Environment variables sourced from the Kubernetes Secret created by SecretProviderClass
+  envFromSecret:
+    enabled: true
+    # secretName will default to appKubernetesSecret.name below, no need to set here unless overriding
+
+  # Additional environment variables (optional)
+  env: []
+    # - name: MY_CUSTOM_ENV_VAR
+    #   value: "my_value"
+    # - name: ENVIRONMENT_NAME # Example of an env var not from Key Vault
+    #   value: "#{environment}#"
+
+# Kubernetes Service for the application
+service:
+  type: ClusterIP
+  port: 80 # Port exposed by the Service
+  targetPort: http # Targets the named port 'http' (8000) on the container
+  annotations: {}
+
+# Ingress configuration
+ingress:
+  enabled: true
+  nameSuffix: "agic-ingress" # Suffix for Ingress resource name
+  annotations:
+    # appgw.ingress.kubernetes.io/rewrite-rule-set-custom-resource is handled by the template
+    appgw.ingress.kubernetes.io/appgw-ssl-certificate: ".com"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-510"
+    appgw.ingress.kubernetes.io/request-timeout: "180"
+    appgw.ingress.kubernetes.io/use-private-ip: "true"
+    # spec.ingressClassName: "azure/application-gateway"
+    kubernetes.io/ingress.class: azure/application-gateway
+  rules:
+    - host: ".com"
+      paths:
+        - path: "/ui/"
+          pathType: "Prefix"
+          backend:
+            # serviceName defaults to {{ include "service.fullname" . }} which is usually correct
+            serviceName: ""
+            # servicePort defaults to the name 'http' from service.targetPort
+            servicePort: "http"
+
+# Azure Application Gateway Rewrite Rule configuration
+appGwRewrite: 
+  enabled: true
+  name: test-service-rewrite
+  rule:
+    name: strip-sample-prefix-rule
+    sequence: 100
+    condition:
+      pathPrefixToStrip: "test-app"
+      ignoreCase: true
+    action:
+      reroute: false
+
+# Resource requests and limits for the container
+resources:
+  limits:
+    cpu: 500m
+    memory: 2048Mi
+  requests:
+    cpu: 200m
+    memory: 1024Mi
+
+# CSI Secrets Store configuration for the Pod
+csiSecrets:
+  enabled: true
+  volumeName: "secrets-store-volume"
+  mountPath: "/mnt/secrets-store"
+  readOnly: true
+  # secretProviderClass will be the name of the SecretProviderClass resource.
+  # It's constructed in the SecretProviderClass template: {{ include "service.fullname" . }}-{{ .Values.secretProviderClass.nameSuffix }}
+  # Ensure this matches that generated name.
+  # For example, if fullname is "myrelease- and spc nameSuffix is "spc", this would be "myrelease-spc".
+  # We will rely on the default suffix 'spc' for the secretProviderClass template if not overridden.
+  # Set this explicitly if your naming is different or you override the suffix.
+  # secretProviderClass: "" # Example: "myrelease-service-azure-kv-wl-id" (if nameSuffix in secretProviderClass is azure-kv-wl-id)
+
+# Name of the Kubernetes Secret to be created by SecretProviderClass
+# and used by the application (e.g., in Deployment's envFrom)
+appKubernetesSecret:
+  name: "be-secret"
+  type: "Opaque"
+  labels: {}
+  annotations: {}
+
+# SecretProviderClass resource configuration
+secretProviderClass:
+  enabled: true
+  # Suffix for the SecretProviderClass resource name.
+  # Full name will be: {{ include "service.fullname" . }}-<nameSuffix>
+  # Example: "myrelease--azure-kv-wl-id"
+  nameSuffix: "azure-kv-wl-id"
+  provider: "azure"
+  parameters:
+    usePodIdentity: "false"
+    useVMManagedIdentity: "false"
+    # userAssignedIdentityID: "" # Only if using user-assigned MSI different from workload identity
+    tenantId: "#{azuretenantid}#"
+    clientID: "#{federatedmanagedidentity}#" # ClientID for Workload Identity
+    keyvaultName: "#{appkeyvault}#"
+    cloudName: "" # Optional, e.g., "AzureUSGovernmentCloud"
+    # objectsRateLimiterDuration: "5m" # Optional
+    objectsToSync:
+
+      - objectName: "secret-key"
+        objectType: "secret"
+      - objectName: "azr--str"
+     
+
+  syncToKubernetesSecrets:
+    - # secretName and type will default to values from appKubernetesSecret above
+      data:
+        - key: "AZURE__STRING"
+          objectName: "azr-storage-conn-str"
+        - key: "AZURE_STORAGE_CONTAINER_NAME"
+          objectName: "azr-storage-container-name"
+        # Probes (optional, but recommended)
+livenessProbe:
+  # httpGet:
+  #   path: /healthz
+  #   # port: http # Will use the named container port 'http'
+  # initialDelaySeconds: 60
+  # periodSeconds: 10
+  # timeoutSeconds: 5
+  # failureThreshold: 3
+  enabled: false # Set to true to enable
+readinessProbe:
+  # httpGet:
+  #   path: /readyz
+  #   # port: http # Will use the named container port 'http'
+  # initialDelaySeconds: 30
+  # periodSeconds: 10
+  # timeoutSeconds: 5
+  # failureThreshold: 3
+  enabled: false # Set to true to enable
+
+autoscaling:
+  enabled: false
+  # minReplicas: 1
+  # maxReplicas: 5
+  # targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
