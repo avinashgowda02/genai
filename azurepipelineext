@@ -48,7 +48,7 @@ resources:
       type: git
       name: test/PIPELINE
 variables:
-  # - group: bitp-shared-dev-kv
+  # - group: dev-kv
   - template: pipeline/variables/${{ parameters.Servicename }}.yml@variables
   - name: ReleaseVersion
     "${{ if or(eq(parameters['action'], 'BuildnPublishnDeploy-package'), ne(parameters['environment'], 'int')) }}":
