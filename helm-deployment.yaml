@@ -1,0 +1,130 @@
+parameters:
+  - name: azureserviceconnection
+    type: string
+  - name: azureSharedkeyVaultName
+    type: string
+  - name: containerregistry
+    type: string
+  - name: azureTenantID
+    type: string
+  - name: ReleaseVersion
+    type: string
+  - name: Servicename
+    type: string
+  - name: kubernetesCluster
+    type: string
+  - name: rgkubernetesCluster
+    type: string
+  - name: Chartname
+    type: string
+  - name: releasename
+    type: string
+  - name: namespace
+    type: string
+  - name: azuresubscription
+    type: string  
+  - name: Environment
+    type: string
+  - name: basepath
+    type: string
+  - name: Domain
+    type: string
+  - name: appKeyVault
+    type: string
+    default: 'defaultAppKeyVault'
+  - name: federatedManagedIdentity
+    type: string
+    default: 'federatedManagedIdentity'
+  - name: includeConfigMap
+    type: boolean
+    default: true
+
+
+
+steps:
+         
+  - checkout: self
+  # - task: AzureKeyVault@1
+  #   enabled: true
+  #   displayName: Get Pipeline Service Principals
+  #   inputs:
+  #     azureSubscription: ${{ parameters.azureserviceconnection }}
+  #     KeyVaultName: ${{ parameters.azureSharedkeyVaultName }}
+  #     secretsFilter: 'automate-azurerm-client-id,automate-azurerm-client-secret'
+  - bash: |
+      echo "--------------------- Log into Azure ---------------------"
+      echo "az login --service-principal -u $(automate-azurerm-client-id) -p $(automate-azurerm-client-secret) --tenant ${{ parameters.azureTenantID }}"
+      az login --service-principal -u $(automate-azurerm-client-id) -p $(automate-azurerm-client-secret) --tenant ${{ parameters.azureTenantID }} || exit $?
+    displayName: Az login
+  - bash: |
+      echo "--------------------- Set the subcription in Azure ---------------------"
+      az account set --subscription "${{ parameters.azuresubscription }}"
+    displayName: Set the subscription
+  - bash : |              
+      az aks get-credentials --name ${{ parameters.kubernetesCluster }} --resource-group ${{ parameters.rgkubernetesCluster }} --admin
+    displayName: Fetch AKS credential 
+  - bash: |
+      export HELM_EXPERIMENTAL_OCI=1
+      helm registry login ${{ parameters.containerregistry }} --username $(automate-azurerm-client-id) --password $(automate-azurerm-client-secret)
+    displayName: ${{ parameters.containerregistry }} ACR login
+  - bash: |
+      echo "##vso[task.setvariable variable=environment;]${{ parameters.Environment }}"
+      echo "##vso[task.setvariable variable=azureclientid;]$(automate-azurerm-client-id)"
+      echo "##vso[task.setvariable variable=azureclientsecret;]$(automate-azurerm-client-secret)"
+      echo "##vso[task.setvariable variable=azuretenantid;]${{ parameters.azureTenantID }}"
+      echo "##vso[task.setvariable variable=artifactregistry;]${{ parameters.containerregistry }}"
+      echo "##vso[task.setvariable variable=domain;]${{ parameters.Domain }}"
+      echo "##vso[task.setvariable variable=appkeyvault;]${{ parameters.appKeyVault }}"
+      echo "##vso[task.setvariable variable=federatedmanagedidentity;]${{ parameters.federatedManagedIdentity }}"
+      echo "##vso[task.setvariable variable=includeconfigmap;]${{ parameters.includeConfigMap }}"
+
+    displayName: Storing environment name
+  - bash: |
+      echo $(environment)
+      echo $(envcertificateapi)
+      echo $(azureclientid)
+      echo $(azureclientsecret)
+      echo $(azuretenantid)
+      echo $(artifactregistry)
+      echo $(appkeyvault)
+      echo $(domain)
+      echo $(federatedmanagedidentity)
+      echo $(includeconfigmap)
+    displayName: displaying env, SP details and certificate name
+    
+  - task: replacetokens@5
+    displayName: Updating value.yaml
+    inputs:
+      rootDirectory: '$(System.DefaultWorkingDirectory)/${{ parameters.basepath }}/Helm-Templates/'
+      targetFiles: 'values.yaml'
+      encoding: 'auto'
+      tokenPattern: 'default'
+      writeBOM: true
+      actionOnMissing: 'warn'
+      keepToken: false
+      actionOnNoFiles: 'continue'
+      enableTransforms: false
+      enableRecursion: false
+      useLegacyPattern: false
+      enableTelemetry: true
+  - bash : |  
+      export HELM_EXPERIMENTAL_OCI=1   
+      pwd
+      ls -larth  
+      cd ${{ parameters.basepath }}   
+      echo ${{ parameters.releasename}}
+      echo ${{ parameters.containerregistry}}
+      echo ${{ parameters.Chartname}}
+      echo ${{ parameters.ReleaseVersion}}
+      echo ${{ parameters.namespace}} 
+      helm upgrade --install ${{ parameters.releasename }} oci://${{ parameters.containerregistry }}/helm/${{ parameters.releasename }}/${{ parameters.Chartname }} --version ${{ parameters.ReleaseVersion }} --values=Helm-Templates/values.yaml --namespace ${{ parameters.namespace }} --create-namespace  --wait
+    displayName: Deploy package 
+
+  - bash: |
+      export HELM_EXPERIMENTAL_OCI=1    
+      pwd
+      ls -larth        
+      helm history ${{ parameters.releasename }} -n ${{ parameters.namespace }}
+      helm status ${{ parameters.releasename }} -n ${{ parameters.namespace }}
+    displayName: helm status
+   
