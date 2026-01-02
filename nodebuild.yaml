@@ -1,0 +1,64 @@
+parameters:
+  - name: pipelineartifactname
+    type: string
+  - name: ci_da_artifactory_user
+    type: string
+  - name: ci_da_artifactory_auth
+    type: string
+
+steps:
+
+    - task: Npm@1            
+      inputs:
+        command: "install"
+        workingDir: "$(folder-path)"
+        verbose: true
+    - task: Bash@3
+      inputs:
+        workingDir: "$(folder-path)"
+        targetType: "inline"
+        script: |
+           pwd
+           cd $(folder-path)        
+           npm run setup                
+    - task: Bash@3
+      inputs:
+        workingDir: "$(folder-path)"
+        targetType: "inline"
+        script: |
+             pwd
+             cd $(folder-path)
+             npm run build --verbose -- --base-href /test/
+             pwd
+             ls -lrta
+             #ng test
+             #npm run test-headless
+             exit 0
+    - bash: |
+       echo $(folder-path)
+       pwd
+       ls -larth
+       cd $(folder-path)
+       pwd
+       ls -larth
+       echo "##vso[task.setvariable variable=releaseversion;isOutput=true]$(node -p "require('./package.json').version")"
+      displayName: Fetching release version from packagejson
+      name: releasename
+
+    - bash: |
+       echo $(releasename.releaseversion)
+      displayName: displaying releaseversion             
+
+
+    - task: CopyFiles@2
+      displayName: Copy the dist to artifact loaction
+      inputs:
+        Contents: '**'
+        TargetFolder: '$(System.DefaultWorkingDirectory)'
+
+    - task: PublishPipelineArtifact@1
+      displayName: Publish the dist as artifacts
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)'
+        ArtifactName: ${{ parameters.pipelineartifactname }}
+        publishLocation: 'pipeline'
