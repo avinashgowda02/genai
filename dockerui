@@ -1,0 +1,44 @@
+# Stage 1: Build Angular app
+FROM baseimage/node:22.14.0 AS builder
+WORKDIR /app
+COPY . .
+RUN pwd
+RUN ls -larth
+RUN ls -larth /app/test_ui/
+RUN ls -larth /app/test_ui/dist
+RUN ls -larth /app/test_ui/dist/test-max-ui
+RUN mkdir /output-directory
+RUN cp -r /app/test_ui/dist /output-directory
+RUN cp -r /app/test_ui/nginx.conf /output-directory
+RUN cp -r /app/test_ui/mime.types /output-directory
+RUN cp -r /app/test_ui/src/environments/environment.ts /output-directory
+RUN cp -r /app/test_ui/src/assets/test_max_login.jpg /output-directory
+#RUN cp -r /app/test_ui/src/assets/test_logo.png /output-directory
+RUN pwd
+RUN ls -larth
+WORKDIR /output-directory
+RUN pwd
+RUN ls -larth
+RUN chmod -R 777 /output-directory
+RUN ls -larth
+RUN cat environment.ts
+WORKDIR /output-directory/dist/test-max-ui
+RUN pwd
+RUN ls -larth
+ 
+# Stage 2: Serve Angular app with nginx
+# Stage 2: Serve Angular app with nginx
+FROM nginx:1.27.0-alpine
+COPY --from=builder /output-directory/dist/test-max-ui/browser /usr/share/nginx/html/
+COPY --from=builder /output-directory/environment.ts /usr/share/nginx/html/environments/environment.ts 
+COPY --from=builder /output-directory/test_max_login.jpg /usr/share/nginx/html/gdm_max_login.jpg
+#COPY --from=builder /output-directory/jep_logo.png /usr/share/nginx/html/jep_logo.png
+WORKDIR /usr/share/nginx/html
+RUN ls -larth /usr/share/nginx/html
+COPY --from=builder /output-directory/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /output-directory/mime.types /etc/nginx/mime.types
+#WORKDIR /etc/nginx/conf.d
+#RUN cat default.conf
+#COPY test_ui/nginx.conf /etc/nginx/sites-available/default
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
