@@ -1,0 +1,91 @@
+parameters:
+  - name: azureserviceconnection
+    type: string
+  - name: azureSharedkeyVaultName
+    type: string
+  - name: containerregistry
+    type: string
+  - name: azureTenantID
+    type: string
+  - name: ReleaseVersion
+    type: string
+    default: 1.0.0
+  - name: AppVersion
+    type: string
+  - name: Servicename
+    type: string
+  - name: Chartname
+    type: string
+  - name: releasename
+    type: string
+  - name: basepath
+    type: string
+  - name: appKeyVault
+    type: string
+    default: 'defaultAppKeyVault'
+
+
+steps:
+
+  - checkout: self
+            
+  # - task: AzureKeyVault@1
+  #   enabled: true
+  #   displayName: Get Pipeline Service Principals
+  #   inputs:
+  #     azureSubscription: ${{ parameters.azureserviceconnection }}
+  #     KeyVaultName: ${{ parameters.azureSharedkeyVaultName }}
+  #     secretsFilter: 'automate-azurerm-client-id,automate-azurerm-client-secret'
+  - bash: |
+      echo "--------------------- Log into Azure ---------------------"
+      echo "az login --service-principal -u $(automate-azurerm-client-id) -p $(automate-azurerm-client-secret) --tenant ${{ parameters.azureTenantID }}"
+      az login --service-principal -u $(automate-azurerm-client-id) -p $(automate-azurerm-client-secret) --tenant ${{ parameters.azureTenantID }} || exit $?
+    displayName: Az login
+  - bash: |
+      helm version
+    displayName: Helm version
+  - bash: |
+      export HELM_EXPERIMENTAL_OCI=1
+      helm registry login ${{ parameters.containerregistry }} --username $(automate-azurerm-client-id) --password $(automate-azurerm-client-secret)
+    displayName: ${{ parameters.containerregistry }} ACR login
+  - bash: |
+      echo "##vso[task.setvariable variable=releaseVersion;]${{ parameters.ReleaseVersion }}"
+      echo "##vso[task.setvariable variable=appversion;]${{ parameters.AppVersion }}"
+    displayName: Storing Appversion and ReleaseVersion
+  - bash: |
+      echo $(releaseVersion)
+      echo $(appversion)
+
+  - task: replacetokens@5
+    displayName: Updating chart.yaml
+    inputs:
+      rootDirectory: '$(System.DefaultWorkingDirectory)/${{ parameters.basepath }}/Helm-Templates/'
+      targetFiles: 'Chart.yaml'
+      encoding: 'auto'
+      tokenPattern: 'default'
+      writeBOM: true
+      actionOnMissing: 'warn'
+      keepToken: false
+      actionOnNoFiles: 'continue'
+      enableTransforms: false
+      enableRecursion: false
+      useLegacyPattern: false
+      enableTelemetry: true
+  - bash: |
+      export HELM_EXPERIMENTAL_OCI=1
+      pwd
+      ls -larth
+      cd ${{ parameters.basepath }}
+      helm package Helm-Templates
+      pwd
+      ls -larth
+    displayName: ${{ parameters.Servicename }} package creation  
+  - bash: |
+      export HELM_EXPERIMENTAL_OCI=1
+      pwd
+      ls -larth
+      cd ${{ parameters.basepath }}
+      pwd
+      ls -larth
+      helm push ${{ parameters.Chartname }}-${{ parameters.ReleaseVersion }}.tgz oci://${{ parameters.containerregistry }}/helm/${{ parameters.releasename }}
+    displayName: ${{ parameters.Servicename }} package push to ACR   
