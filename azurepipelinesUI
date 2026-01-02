@@ -1,0 +1,225 @@
+name: testui_UI - Pipeline
+trigger:
+  branches:
+    include:
+      - dev-deploy
+parameters:
+- name: JFrog
+  displayName: 'Upload to Jfrog'
+  type: boolean
+  default: 'false'
+- name: environment 
+  displayName: Environment name
+  default: 'dev'
+  type: string
+  values:
+  - dev
+  - test
+- name: zone
+  displayName: Zone
+  default: 'eastus'
+  type: string
+  values:
+  - eastus
+  - westus   
+ 
+- name: action
+  displayName: Select Action 
+  type: string
+  default: 'BuildnPublishnDeploy-package'
+  values:
+  - Build-angular
+  - BuildnPublish-image
+  - BuildnPublishnDeploy-package
+  - Deploy-package
+- name: Releaseversion
+  displayName: 'Version of the release'
+  type: string
+  default: 0.0.1-DIST
+- name: Servicename
+  displayName: Service name
+  type: string
+  default: testui_ui
+ 
+resources:
+  repositories:
+    - repository: variables
+      type: git
+      name: ADX-DAS-ART/IN-DAS-ART-PIPELINE 
+      ref: feature/ui
+ 
+variables:
+# - group: bitp-shared-dev-kv
+- template: pipeline/variables/${{ parameters.Servicename }}.yml@variables
+- name: ReleaseVersion
+  ${{ if or(eq(parameters['action'], 'Deploy-package'), ne(parameters['environment'], 'dev')) }}:
+   value: ${{ parameters.Releaseversion }}   
+- name: imageTag
+  value: $(Build.BuildId)
+ 
+# Conditional template inclusion based on environment and zone
+- ${{ if or(eq(parameters.environment, 'dev'), eq(parameters.environment, 'test')) }}:
+    template: pipeline/variables/${{ parameters.environment }}.yml@variables 
+ 
+stages:
+- ${{ if in(parameters.environment, 'dev', 'test') }}:
+  - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-angular') }}:
+    - stage: InitialStage
+      displayName: 'Initial Stage'
+      jobs:
+      - job: InitialJob
+        displayName: 'Initial Job'
+        pool: $(agentpool-linux-name)
+        steps:
+        - script: echo "This is the initial stage that runs without dependencies."
+                  echo $(image-src-node)
+                  echo $(end-point) 
+- ${{ if in(parameters.environment, 'dev') }}:
+  - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-angular') }}:   
+    - stage: Buildthesourcecode
+      displayName: ${{ parameters.Servicename }} build angular
+      jobs:
+      - job: Build_angular_file
+        displayName: Build ${{ parameters.Servicename }} angular dist
+        pool: $(agentpool-linux-name)
+        container:
+          image: $(image-src-node)
+          options: --user 0
+          endpoint: bitp-acr-dev-westus-serviceconnection
+        steps:
+          - template: pipeline/templates/node-build.yml@variables 
+            parameters:
+              pipelineartifactname: $(pipelineartifact-name)
+              ci_da_artifactory_user: 'bitp-artif-svc'
+              ci_da_artifactory_auth: 'e1oM9lWhaqDkPpfXLfKjOtcVtIC7YMsM'
+      - job: SonarQubeScan
+        dependsOn: Build_angular_file
+        pool: 
+          name: $(agentpool-linux-name)
+        displayName: SonarQube
+        workspace:
+          clean: all
+        container: 
+          image: $(image-src-node-sonar)
+          endpoint: bitp-daaacrprod-dev-new-sc          
+        steps:
+            - template: pipeline/templates/sonar-ui.yml@variables
+              parameters:
+                pipelineartifactname: $(pipelineartifact-name)
+                projectpath: '$(System.DefaultWorkingDirectory)/$(folder-path)'
+                sonarexclusion: '$(sonar-exclusions)'              
+ 
+- ${{ if in(parameters.environment, 'test') }}:
+  - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-angular') }}:   
+    - stage: Buildthesourcecode
+      displayName: ${{ parameters.Servicename }} build angular
+      jobs:
+      - job: Build_angular_file
+        displayName: Build ${{ parameters.Servicename }} angular dist
+        pool: $(agentpool-linux-name)
+        container:
+          image: $(image-src-node)
+          endpoint: acr_testui_test_sc_backup
+        steps:
+          - template: pipeline/templates/node-build.yml@variables 
+            parameters:
+              pipelineartifactname: $(pipelineartifact-name)
+              ci_da_artifactory_user: $(CI_DA_ARTIFACTORY_USER)
+              ci_da_artifactory_auth: $(CI_DA_ARTIFACTORY_AUTH)
+
+# - ${{ if in(parameters.environment, 'dev' ) }}: 
+#   - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image' , 'Build-angular' ) }}:  
+#     - stage: CoverityScan
+#       displayName: ${{ parameters.Servicename }} Coverity Scan
+#       jobs:
+#       - job: Codescan
+#         pool:
+#           name: $(agentpool-linux-name)
+#         displayName: Coverity Scan
+#         workspace:
+#           clean: all
+#         container: 
+#           image: $(image-src-java-coverity)
+#           endpoint: 'bitp-daaacrprod-dev-new-sc'
+#         steps:
+#            - template: pipeline/templates/coverity-ui.yml@variables
+#              parameters:
+#               azureserviceconnection: $(azure-serviceconnection)
+#               azureSharedkeyVaultName: $(azure-SharedkeyVaultName)
+#               appKeyVault: $(testui-appkeyvault)
+#               covStream: $(covStream)              
+ 
+- ${{ if in(parameters.environment, 'dev', 'test') }}:  
+  - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image') }}:
+    - stage: BuildandPushDockerImage
+      dependsOn: 
+       - Buildthesourcecode
+      displayName: ${{ parameters.Servicename }} build/push/twistlock scan image
+      jobs:
+      - job: Build_Push_DockerImage_${{ parameters.Servicename }}
+        displayName: Build/Push/twistlock scan ${{ parameters.Servicename }} image 
+        pool: 
+          name: '$(agentpool-linux-name)'     
+        steps:
+        - bash: |
+            echo "All partitions:"
+            df -h 
+            echo "--- Docker Info ---"
+            docker info | grep "Docker Root Dir"          
+            echo "Removing node_modules to free up space for Docker build..."
+            rm -rf $(System.DefaultWorkingDirectory)/testui_UI/node_modules
+            rm -rf $(System.DefaultWorkingDirectory)/testui_UI/.npm-cache
+            echo "Disk Space after cleanup:"
+            df -h .
+          displayName: 'Cleanup Workspace'
+        - bash: |
+            echo "Cleaning up Docker system..."
+            docker system prune -af
+            echo "Disk space after prune:"
+            df -h /data/docker
+          displayName: 'Emergency Docker Cleanup'
+        - template: pipeline/templates/image-ui-build.yml@variables 
+          parameters:
+           pipelineartifactname: $(pipelineartifact-name)  
+           sourceacrsc: $(testui-acr-sc)
+           imagerepositoryname: $(imagerepository-name)
+           testuiacrsc: $(testui-acr-sc)
+           servicename: ${{ parameters.Servicename }}
+           imageTag: $(imageTag)
+           baseimageacr: $(base-image-acr)                    
+ 
+- ${{ if in(parameters.environment, 'dev', 'test') }}:  
+  - ${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'Deploy-package') }}:    
+    - stage: Deploy_${{ parameters.Servicename }}_To_K8s_${{ parameters.environment }}
+      displayName: 'Deploy ${{ parameters.Servicename }} to Kubernetes (${{ parameters.environment }})'
+      dependsOn:
+      - ${{ if eq(parameters.action, 'BuildnPublishnDeploy-package') }}: 
+        - BuildandPushDockerImage
+      jobs:
+      - deployment: Kubernetes_DeployJob # This is an ADO deployment job
+        displayName: 'Deploying ${{ parameters.Servicename }} Manifests'
+        environment: 'testui-${{ parameters.environment }}-${{ parameters.Servicename }}' 
+        pool: $(agentpool-linux-name)
+        container:
+          image: 'daaacrprod.azurecr.io/daa/azure-k8s:latest' 
+          endpoint: 'bitp-daaacrprod-dev-new-sc' 
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+              - template: pipeline/templates/kubernetes-ui-manifest-deploy.yml@variables # Path to your new step template
+                parameters:
+                  azureserviceconnection: $(azure-serviceconnection) 
+                  azureSharedkeyVaultName: $(azure-SharedkeyVaultName) 
+                  azureTenantID: $(azure-TenantID) 
+                  kubernetesCluster: $(kubernetes-Cluster) 
+                  rgkubernetesCluster: $(rg-kubernetes-Cluster) 
+                  namespace: $(name-space) 
+                  azuresubscription: $(azure-subscription)                   
+                  containerregistry: $(imagerepository-name)
+                  basepath: $(base-path) 
+                  imageTag: $(imageDeployTag)  
+                  servicename: ${{ parameters.Servicename }}    
+                  ReleaseVersion: $(ReleaseVersion)   
+                  Environment: $(environment-name)          
+                  k8smanifests: $(k8smanifests) 
