@@ -1,0 +1,196 @@
+---
+name: test_EXTRACTION - Pipeline
+trigger:
+  branches:
+    include:
+      - origin/uat-deploy
+parameters:
+  - name: JFrog
+    displayName: Upload to Jfrog
+    type: boolean
+    default: "false"
+  - name: environment
+    displayName: Environment name
+    default: uat
+    type: string
+    values:
+      - dev
+      - uat
+      - int
+  - name: zone
+    displayName: Zone
+    default: westus
+    type: string
+    values:
+      - eastus
+      - westus
+  - name: action
+    displayName: Select Action
+    type: string
+    default: BuildnPublishnDeploy-package
+    values:
+      - Build-python
+      - BuildnPublish-image
+      - BuildnPublishnDeploy-package
+      - Deploy-package
+  - name: Releaseversion
+    displayName: Version of the release
+    type: string
+    default: 1.0.0
+  - name: Servicename
+    displayName: Service name
+    type: string
+    default: test_extraction
+      ref: feature/uat
+resources:
+  repositories:
+    - repository: variables
+      type: git
+      name: test/PIPELINE
+variables:
+  # - group: bitp-shared-dev-kv
+  - template: pipeline/variables/${{ parameters.Servicename }}.yml@variables
+  - name: ReleaseVersion
+    "${{ if or(eq(parameters['action'], 'BuildnPublishnDeploy-package'), ne(parameters['environment'], 'int')) }}":
+      value: ${{ parameters.Releaseversion }}
+  - name: imageTag
+    value: $(Build.BuildId)
+  - "${{ if or(eq(parameters.environment, 'dev'), eq(parameters.environment, 'int'), eq(parameters.environment, 'uat')) }}":
+      template: pipeline/variables/${{ parameters.environment }}.yml@variables
+stages:
+  - "${{ if in(parameters.environment, 'dev', 'int', 'uat') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-python') }}":
+          - stage: InitialStage
+            displayName: Initial Stage
+            jobs:
+              - job: InitialJob
+                displayName: Initial Job
+                pool: $(agentpool-linux-name)
+                steps:
+                  - script: echo "This is the initial stage that runs without dependencies." echo
+                      $(image-src-python) echo $(end-point)
+  - "${{ if in(parameters.environment, 'dev', 'uat') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-python') }}":
+          - stage: Buildthesourcecode
+            displayName: ${{ parameters.Servicename }} build python
+            jobs:
+              - job: Build_python_file
+                displayName: Build ${{ parameters.Servicename }} python dist
+                pool: $(agentpool-linux-name)
+                container:
+                  image: $(image-src-python)
+                  endpoint:  bitp-acr-dev-westus-serviceconnection
+                steps:
+                  - template: pipeline/templates/python-build.yml@variables
+                    parameters:
+                      pipelineartifactname: $(pipelineartifact-name)
+                      ci_da_artifactory_user: $(CI_DA_ARTIFACTORY_USER)
+                      ci_da_artifactory_auth: $(CI_DA_ARTIFACTORY_AUTH)
+  - "${{ if in(parameters.environment, 'int') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image', 'Build-python') }}":
+          - stage: Buildthesourcecode
+            displayName: ${{ parameters.Servicename }} build python
+            jobs:
+              - job: Build_python_file
+                displayName: Build ${{ parameters.Servicename }} python dist
+                pool: $(agentpool-linux-name)
+                container:
+                  image: $(image-src-python)
+                  endpoint: acr_test_test_sc_backup
+                steps:
+                  - template: pipeline/templates/python-build.yml@variables
+                    parameters:
+                      pipelineartifactname: $(pipelineartifact-name)
+                      ci_da_artifactory_user: $(CI_DA_ARTIFACTORY_USER)
+                      ci_da_artifactory_auth: $(CI_DA_ARTIFACTORY_AUTH)
+  - "${{ if in(parameters.environment, 'dev', 'int', 'uat') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package', 'BuildnPublish-image') }}":
+          - stage: BuildandPushDockerImage
+            dependsOn:
+              - Buildthesourcecode
+            displayName: ${{ parameters.Servicename }} build/push/twistlock scan image
+            jobs:
+              - job: Build_Push_DockerImage_${{ parameters.Servicename }}
+                displayName: Build/Push/twistlock scan ${{ parameters.Servicename }} image
+                pool:
+                  name: $(agentpool-linux-name)
+                steps:
+                  - template: pipeline/templates/image-backend-build.yml@variables
+                    parameters:
+                      pipelineartifactname: $(pipelineartifact-name)
+                      sourceacrsc: $(test-acr-sc)
+                      imagerepositoryname: $(imagerepository-name)
+                      testacrsc: $(test-acr-sc)
+                      servicename: ${{ parameters.Servicename }}
+                      imageTag: $(imageTag)
+                      baseimageacr: $(base-image-acr)
+  - "${{ if in(parameters.environment, 'dev', 'int', 'uat') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package') }}":
+          - stage: ${{ parameters.Servicename }}_package_creation
+            dependsOn:
+              - Buildthesourcecode
+              - BuildandPushDockerImage
+            displayName: ${{ parameters.Servicename }} package creation
+            jobs:
+              - job: helm_${{ parameters.Servicename }}_package_creation
+                displayName: Helm ${{ parameters.Servicename }} package creation
+                pool: $(agentpool-linux-name)
+                container:
+                  image: daaacrprod.azurecr.io/daa/azure-k8s:latest
+                  endpoint:  dev-new-sc
+                steps:
+                  - bash: |
+                      echo $(ReleaseVersion)
+                  - template: pipeline/templates/helm-package-creation.yml@variables
+                    parameters:
+                      azureserviceconnection: $(azure-serviceconnection)
+                      azureSharedkeyVaultName: $(azure-SharedkeyVaultName)
+                      containerregistry: $(container-registry-test)
+                      azureTenantID: $(azure-TenantID)
+                      ReleaseVersion: $(ReleaseVersion)
+                      AppVersion: $(imageTag)
+                      servicename: ${{ parameters.Servicename }}
+                      Chartname: $(chart-name)
+                      releasename: $(release-name)
+                      basepath: $(base-path)
+  - "${{ if in(parameters.environment, 'dev', 'int', 'uat') }}":
+      - "${{ if in(parameters.action, 'BuildnPublishnDeploy-package') }}":
+          - stage: ${{ parameters.Servicename }}_${{ parameters.environment
+              }}_package_deployment
+            dependsOn:
+              - Buildthesourcecode
+              - ${{ parameters.Servicename }}_package_creation
+            displayName: ${{ parameters.Servicename }} ${{ parameters.environment }} package
+              deployment
+            jobs:
+              - deployment: deploy
+                displayName: Helm ${{ parameters.Servicename }} package deploy
+                environment: test-${{ parameters.environment }}-${{ parameters.Servicename }}
+                continueOnError: false
+                pool: $(agentpool-linux-name)
+                container:
+                  image: acr.azurecr.io/azure-k8s:latest
+                  endpoint: dev-new-sc
+                strategy:
+                  runOnce:
+                    deploy:
+                      steps:
+                        - template: pipeline/templates/helm-package-deployment.yml@variables
+                          parameters:
+                            azureserviceconnection: $(azure-serviceconnection)
+                            azureSharedkeyVaultName: $(azure-SharedkeyVaultName)
+                            containerregistry: $(container-registry-test)
+                            azureTenantID: $(azure-TenantID)
+                            ReleaseVersion: $(ReleaseVersion)
+                            servicename: ${{ parameters.Servicename }}
+                            kubernetesCluster: $(kubernetes-Cluster)
+                            rgkubernetesCluster: $(rg-kubernetes-Cluster)
+                            Chartname: $(chart-name)
+                            releasename: $(release-name)
+                            namespace: $(name-space)
+                            azuresubscription: $(azure-subscription)
+                            Environment: $(environment-name)
+                            basepath: $(base-path)
+                            Domain: $(domain)
+                            appKeyVault: $(test-appkeyvault)
+                            federatedManagedIdentity: $(federated-managed-identity)
