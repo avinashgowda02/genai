@@ -1,0 +1,8 @@
+apiVersion: v2
+name: service # Consider a more descriptive name like gdmmax-app
+description: A Helm chart for Kubernetes
+
+type: application
+version: "#{releaseversion}#" # Ensure CI/CD replaces this
+# version: 1.0.0 # Ensure CI/CD replaces this
+appVersion: "#{appversion}#"   # Ensure CI/CD replaces this (and quote if complex)
